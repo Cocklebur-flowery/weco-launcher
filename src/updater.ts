@@ -1,6 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { parseRelease, safeRelativePath, type Release, type Platform } from './release.ts';
 import { download, type TransferProgress } from './download.ts';
 import { acquireLock, assertWorkspace, atomicJson, copyRegular, digest, exists, privateDirectory, readInstalled,
@@ -59,6 +59,11 @@ async function prepare(root: string, raw: Release, options: Options): Promise<Ma
   options.signal?.throwIfAborted();
   const space = options.availableBytes ? await options.availableBytes() : await fs.statfs(root).then(s => s.bavail * s.bsize);
   const installed = await readInstalled(root);
+  if (installed?.channel==='stable' && release.channel!=='stable') throw new Error('Stable workspace cannot switch to DEV; choose a separate workspace');
+  if (installed?.channel==='stable' && installed.sequence!==undefined) {
+    if (release.sequence===undefined || release.sequence<installed.sequence) throw new Error('Stable release rollback refused');
+    if (release.sequence===installed.sequence && createHash('sha256').update(JSON.stringify(release)).digest('hex')!==installed.releaseHash) throw new Error('Stable sequence reused for different release content');
+  }
   const required = release.files.reduce((n, f) => n + f.size * 2, 16 * 1024 ** 2)
     + (installed?.owned.reduce((n, f) => n + f.size, 0) || 0);
   if (space < required) throw new Error('Insufficient disk space');
@@ -142,7 +147,8 @@ export async function installRelease(root: string, raw: Release, options: Option
         options.progress?.({ phase: 'installing', path: change.path, bytes: index + 1, total: changes.length });
         if (options.faultAfter === index + 1) throw new Error('Injected installation failure');
       }
-      const installed: Installed = { releaseId: release.releaseId, channel: release.channel, owned };
+      const installed: Installed = { releaseId: release.releaseId, channel: release.channel, owned,
+        ...(release.sequence!==undefined ? {sequence:release.sequence,releaseHash:createHash('sha256').update(JSON.stringify(release)).digest('hex')} : {}) };
       await atomicJson(path.join(root, '.launcher', 'installed.json'), installed);
       journal.status = 'committed'; await atomicJson(path.join(directory, 'journal.json'), journal);
       await fs.rm(directory, { recursive: true });

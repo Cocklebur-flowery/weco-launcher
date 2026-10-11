@@ -24,6 +24,13 @@ Building a package is not successful in-game validation.
 
 A release has schemaVersion=1, releaseId, channel=dev|stable, activation=preview|active,
 minecraft, neoforge, platforms, and files.
+Stable additionally requires a positive safe-integer sequence covered by the signature.
+DEV schema-v1 manifests remain compatible without this field. Installed Stable state
+records the sequence and canonical release hash. Old counters and altered content
+under the same counter are rejected before downloads; intentional content rollback
+must be a newly signed higher sequence. A Stable workspace cannot become DEV in place.
+Legacy installed metadata without a counter gains this protection on its first new
+signed Stable installation; no existing game directory is silently adopted.
 Each file has path, size, sha256, policy=managed|default, urls.
 URLs use HTTPS; HTTP is allowed only for explicit loopback test fixtures.
 Source hashes validate bytes; an Ed25519 signed envelope authenticates an immutable release.
@@ -48,7 +55,9 @@ No activation while a game process is alive.
 Installation uses a persistent undo journal; startup recovery restores the prior whole release.
 This covers process interruption, not a promise of power-loss durability without filesystem fsync.
 Disk-space checks and fault-injection tests precede use with real client files.
-Preview can be prepared but not activated. Stable changes require a later P5 decision.
+Preview can be prepared but not activated. Stable publication requires a read-only
+snapshot of server Mod bytes plus explicit server-only and client-only lists. Shared
+Mods must match those bytes; this does not promote unfinished DEV builds or upload COS.
 
 ## Exclusions and acceptance
 

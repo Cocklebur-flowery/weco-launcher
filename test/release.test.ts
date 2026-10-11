@@ -25,3 +25,8 @@ test('signed release requires locally trusted Ed25519 key', () => {
   assert.throws(() => verifyEnvelope({ ...e, payload: payload + ' ' }, keys));
   assert.throws(() => verifyEnvelope(e, {}));
 });
+test('Stable releases require a signed positive sequence while old DEV manifests remain valid',()=>{
+  assert.equal(parseRelease(release()).sequence,undefined);
+  for(const sequence of [undefined,0,-1,1.5,Number.MAX_SAFE_INTEGER+1])assert.throws(()=>parseRelease({...release(),channel:'stable',sequence}),/sequence/);
+  assert.equal(parseRelease({...release(),channel:'stable',sequence:1}).sequence,1);
+});

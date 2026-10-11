@@ -176,3 +176,17 @@ test('symlink escapes and existing clients are refused', async t => {
   const occupied = path.join(f.directory, 'existing'); await fs.mkdir(occupied); await fs.writeFile(path.join(occupied, 'options.txt'), 'player');
   await assert.rejects(initializeWorkspace(occupied), /empty folder/);
 });
+test('Stable updates persist sequence and reject rollback or reused sequence before any download',async t=>{
+  const f=await fixture(t);const a={...f.release('stable-a',{'mods/a.jar':'A'}),channel:'stable' as const,sequence:7};
+  const options={allowLoopback:true,channel:'stable' as const};await installRelease(f.root,a,options);
+  assert.equal((await readInstalled(f.root))?.sequence,7);const before=f.hits.length;
+  await installRelease(f.root,a,options);assert.equal(f.hits.length,before);
+  await assert.rejects(installRelease(f.root,{...f.release('older',{'mods/a.jar':'old'}),channel:'stable',sequence:6},options),/rollback/);
+  await assert.rejects(installRelease(f.root,{...f.release('changed',{'mods/a.jar':'new'}),channel:'stable',sequence:7},options),/reused/);
+  await assert.rejects(installRelease(f.root,f.release('dev',{}),{allowLoopback:true,channel:'dev'}),/separate workspace/);
+  assert.equal(f.hits.length,before);assert.equal(await fs.readFile(path.join(f.root,'game','mods','a.jar'),'utf8'),'A');
+  const b={...f.release('stable-b',{'mods/a.jar':'new'}),channel:'stable' as const,sequence:8};
+  await assert.rejects(installRelease(f.root,b,{...options,faultAfter:1}),/Injected/);
+  assert.equal((await readInstalled(f.root))?.sequence,7);assert.equal(await fs.readFile(path.join(f.root,'game','mods','a.jar'),'utf8'),'A');
+  await installRelease(f.root,b,options);assert.equal((await readInstalled(f.root))?.sequence,8);
+});

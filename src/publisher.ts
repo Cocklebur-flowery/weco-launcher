@@ -5,7 +5,8 @@ import { parseRelease, safeRelativePath, safeUrl, type Release, type Platform } 
 import { fingerprint, inventoryClient, lookupModrinth, type Origin, type Lookup } from './catalog.ts';
 
 export type PlanFile = { path: string; sha256: string; policy: 'managed' | 'default'; reviewed?: boolean; source: Origin };
-export type PublishPlan = { schemaVersion: 1; releaseId: string; platforms: Platform[]; files: PlanFile[] };
+export type PublishPlan = { schemaVersion: 1; releaseId: string; platforms: Platform[]; files: PlanFile[];
+  channel?:'dev'|'stable';sequence?:number;stableBaseline?:{serverRoot:string;serverOnly:string[];clientOnly:string[]} };
 type Options = { localTest?: boolean; lookup?: Lookup };
 
 export async function assertOutputOutside(source: string, output: string): Promise<void> {
@@ -28,6 +29,24 @@ export async function buildRelease(directory: string, plan: PublishPlan, options
   const included = new Set(plan.files.map(f => f.path));
   const missing = inventory.files.filter(f => f.category === 'mod' && !included.has(f.path));
   if (missing.length) throw new Error('Required Mods omitted: ' + missing.map(f => f.path).join(', '));
+  if (plan.channel==='stable') {
+    const baseline=plan.stableBaseline;
+    if(!baseline || !path.isAbsolute(baseline.serverRoot) || !Array.isArray(baseline.serverOnly) || !Array.isArray(baseline.clientOnly)) throw new Error('Stable publication requires an explicitly reviewed server baseline');
+    const mods=path.join(await fs.realpath(baseline.serverRoot),'mods');const entries=await fs.lstat(mods);
+    if(!entries.isDirectory() || entries.isSymbolicLink()) throw new Error('Invalid Stable server Mod directory');
+    const server=new Map<string,string>();
+    for(const name of await fs.readdir(mods)) {
+      if(!name.endsWith('.jar'))continue;const relative='mods/'+name;safeRelativePath(relative);
+      server.set(relative,(await fingerprint(path.join(mods,name))).sha256);
+    }
+    if(!server.size)throw new Error('Stable server baseline has no Mods');
+    const clientMods=inventory.files.filter(f=>f.category==='mod');
+    for(const name of baseline.serverOnly)if(!server.has(name))throw new Error('Unknown server-only baseline entry: '+name);
+    for(const name of baseline.clientOnly)if(!clientMods.some(f=>f.path===name))throw new Error('Unknown client-only baseline entry: '+name);
+    const requiredHashes=new Set([...server].filter(([name])=>!baseline.serverOnly.includes(name)).map(([,hash])=>hash));
+    for(const hash of requiredHashes)if(!clientMods.some(f=>f.sha256===hash))throw new Error('Client is missing or diverges from the Stable server baseline');
+    for(const file of clientMods)if(!requiredHashes.has(file.sha256) && !baseline.clientOnly.includes(file.path))throw new Error('Unreviewed client-only Mod: '+file.path);
+  }
   if (options.localTest && !/^local-[a-zA-Z0-9._-]+$/.test(plan.releaseId)) throw new Error('Local-test release ID must start with local-');
   const files = []; const provenance = [];
   for (const selected of [...plan.files].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)) {
@@ -64,8 +83,9 @@ export async function buildRelease(directory: string, plan: PublishPlan, options
       ...(source.kind === 'project' ? { project: source.project, proofSha256: file.sha256 } : {}),
       ...(source.kind === 'manual' ? { pageUrl: source.pageUrl } : {}) });
   }
-  const release = parseRelease({ schemaVersion: 1, releaseId: plan.releaseId, channel: 'dev', activation: 'active',
-    minecraft: '1.21.1', neoforge: '21.1.250', platforms: plan.platforms, files }, options.localTest);
+  const release = parseRelease({ schemaVersion: 1, releaseId: plan.releaseId, channel: plan.channel || 'dev', activation: 'active',
+    minecraft: '1.21.1', neoforge: '21.1.250', platforms: plan.platforms, files,
+    ...(plan.sequence!==undefined ? {sequence:plan.sequence} : {}) }, options.localTest);
   return { release, provenance, localTest: Boolean(options.localTest) };
 }
 

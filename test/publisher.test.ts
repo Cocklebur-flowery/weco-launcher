@@ -123,3 +123,19 @@ test('release difference counts content/policy changes but not URL-only changes'
   assert.deepEqual(compareReleases(a, b), { added: [], changed: [], removed: [], reused: [f.file.path] });
   b.files[0].sha256 = '0'.repeat(64); assert.deepEqual(compareReleases(a, b).changed, [f.file.path]);
 });
+test('Stable producer checks installed server bytes and explicit client/server-only review',async t=>{
+  const f=await fixture(t);const plan={...f.plan,channel:'stable' as const,sequence:1};
+  await assert.rejects(buildRelease(f.source,plan,{localTest:true}),/server baseline/);
+  const server=path.join(f.directory,'server');await fs.mkdir(path.join(server,'mods'),{recursive:true});
+  await fs.copyFile(path.join(f.source,f.file.path),path.join(server,'mods','server-name.jar'));
+  const stable:PublishPlan={...plan,stableBaseline:{serverRoot:server,serverOnly:[],clientOnly:[]}};
+  assert.equal((await buildRelease(f.source,stable,{localTest:true})).release.channel,'stable');
+  await fs.writeFile(path.join(server,'mods','server-name.jar'),'newer server build');
+  await assert.rejects(buildRelease(f.source,stable,{localTest:true}),/diverges/);
+  stable.stableBaseline!.serverOnly=['mods/server-name.jar'];
+  await assert.rejects(buildRelease(f.source,stable,{localTest:true}),/client-only/);
+  stable.stableBaseline!.clientOnly=[f.file.path];
+  await buildRelease(f.source,stable,{localTest:true});
+  stable.stableBaseline!.clientOnly=['mods/nonexistent.jar'];
+  await assert.rejects(buildRelease(f.source,stable,{localTest:true}),/Unknown client-only/);
+});

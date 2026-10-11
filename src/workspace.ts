@@ -5,7 +5,7 @@ import { createReadStream } from 'node:fs';
 import { safeRelativePath } from './release.ts';
 
 export type OwnedFile = { path: string; sha256: string; size: number };
-export type Installed = { releaseId: string; channel: string; owned: OwnedFile[] };
+export type Installed = { releaseId: string; channel: string; owned: OwnedFile[]; sequence?:number; releaseHash?:string };
 export async function exists(file: string): Promise<boolean> {
   try { await fs.lstat(file); return true; } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return false; throw e; }
 }
@@ -72,6 +72,8 @@ export async function readInstalled(root: string): Promise<Installed | null> {
 export function validateInstalled(input: unknown): Installed {
   const value = input as Installed;
   if (!value || typeof value.releaseId !== 'string' || !['dev', 'stable'].includes(value.channel) || !Array.isArray(value.owned) || value.owned.length > 10000) throw new Error('Invalid installed state');
+  if ((value.sequence!==undefined || value.releaseHash!==undefined)
+    && (!Number.isSafeInteger(value.sequence) || Number(value.sequence)<1 || !/^[a-f0-9]{64}$/.test(value.releaseHash || ''))) throw new Error('Invalid installed sequence');
   const names = new Set<string>();
   for (const f of value.owned) {
     safeRelativePath(f.path);

@@ -5,6 +5,7 @@ export type ReleaseFile = { path: string; size: number; sha256: string; policy: 
 export type Release = {
   schemaVersion: 1; releaseId: string; channel: 'dev' | 'stable'; activation: 'preview' | 'active';
   minecraft: string; neoforge: string; platforms: Platform[]; files: ReleaseFile[];
+  sequence?: number;
 };
 const platforms = new Set(['win32-x64', 'linux-x64', 'darwin-arm64', 'darwin-x64']);
 const protectedSegments = /^(?:\.town_mcp|town-chunk-cache|Distant_Horizons_server_data|townui-cache|saves|screenshots|logs)$/i;
@@ -39,6 +40,7 @@ export function parseRelease(value: unknown, allowLoopback = false): Release {
     || !['preview', 'active'].includes(String(r.activation))) throw new Error('Unsupported release');
   const releaseId = string(r.releaseId);
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/.test(releaseId)) throw new Error('Invalid release ID');
+  if ((r.sequence!==undefined || r.channel==='stable') && (!Number.isSafeInteger(r.sequence) || Number(r.sequence)<1)) throw new Error('Stable release requires a positive sequence');
   if (r.minecraft !== '1.21.1' || r.neoforge !== '21.1.250') throw new Error('Unsupported runtime baseline');
   if (!Array.isArray(r.platforms) || !r.platforms.length || r.platforms.some(p => !platforms.has(p))) throw new Error('Unsupported platform');
   if (!Array.isArray(r.files) || r.files.length > 10000) throw new Error('Invalid files');
@@ -63,7 +65,8 @@ export function parseRelease(value: unknown, allowLoopback = false): Release {
     while (segments.length > 1) { segments.pop(); if (names.has(segments.join('/'))) throw new Error('Path prefix collision'); }
   }
   return { schemaVersion: 1, releaseId, channel: r.channel as Release['channel'], activation: r.activation as Release['activation'],
-    minecraft: '1.21.1', neoforge: '21.1.250', platforms: r.platforms as Platform[], files };
+    minecraft: '1.21.1', neoforge: '21.1.250', platforms: r.platforms as Platform[], files,
+    ...(r.sequence!==undefined ? {sequence:Number(r.sequence)} : {}) };
 }
 export function verifyEnvelope(value: unknown, trustedKeys: Record<string, string>, allowLoopback = false): Release {
   const envelope = record(value);
