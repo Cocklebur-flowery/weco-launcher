@@ -8,6 +8,11 @@ import { getVersionList, install, installNeoForged, installDependencies, fetchJa
 import { acquireLock, assertWorkspace, atomicJson, digest, exists, privateDirectory, safeTarget } from './workspace.ts';
 import { recover } from './updater.ts';
 import type { Settings } from './contracts.ts';
+import type { GameLogin } from './auth.ts';
+import { authenticatedOptions } from './game-auth.ts';
+import type { LaunchOption } from '@xmcl/core';
+
+export type GameAuthentication = {login:GameLogin;agent?:LaunchOption['yggdrasilAgent']};
 
 const exec = promisify(execFile);
 export async function findJava(): Promise<string> {
@@ -119,7 +124,7 @@ export async function bootstrap(root: string, java: string, log: (line: string) 
     return id;
   } finally { await lock.release(); }
 }
-export async function startMinecraft(settings: Settings, log: (line: string) => void, ended: (code: number | null) => void): Promise<number> {
+export async function startMinecraft(settings: Settings, log: (line: string) => void, ended: (code: number | null) => void, authentication?:GameAuthentication): Promise<number> {
   offlineProfile(settings.playerName);
   await checkJava(settings.javaPath);
   await assertWorkspace(settings.workspace);
@@ -134,14 +139,15 @@ export async function startMinecraft(settings: Settings, log: (line: string) => 
     const version = await Version.parse(game, settings.versionId);
     const options = {
       javaPath: settings.javaPath, gamePath: game, resourcePath: game, version: settings.versionId,
-      gameProfile: offlineProfile(settings.playerName), accessToken: '0', userType: 'legacy' as const,
-      launcherName: 'Town Launcher', launcherBrand: 'TownLife', gameName: 'RCT DEV',
+      ...(authentication ? authenticatedOptions(authentication.login,authentication.agent)
+        : {gameProfile:offlineProfile(settings.playerName),accessToken:'0',userType:'legacy' as const}),
+      launcherName: 'Town Launcher', launcherBrand: 'TownLife', gameName: 'RCT '+settings.channel.toUpperCase(),
       minMemory: 512, maxMemory: settings.memoryMiB, extraJVMArgs: ['-XX:+UseG1GC'],
       resolution: { width: 1280, height: 800 },
       extraMCArgs: settings.autoConnect ? ['--quickPlayMultiplayer', settings.serverAddress + ':' + settings.serverPort] : [],
       extraExecOption: { cwd: game, shell: false },
       features: { town_launcher_values: { primary_jar_name: version.minecraftVersion + '.jar',
-        clientid: '00000000-0000-0000-0000-000000000000', auth_xuid: '0' } }
+        clientid: authentication?.login.clientId || '00000000-0000-0000-0000-000000000000', auth_xuid: authentication?.login.xuid || '0' } }
     };
     const args = await generateArguments(options);
     if (args.some(arg => arg.includes('${'))) throw new Error('Unresolved launcher placeholder');

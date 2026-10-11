@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { type Account, AuthApi, account, authUrl, object, text, uuid } from './auth-api.ts';
+import { type Account, AuthApi, AuthError, account, authUrl, object, text, uuid } from './auth-api.ts';
 import { Vault } from './vault.ts';
 
 type Stored = { api: string; account: Account; platformToken: string; clientToken: string; refreshToken?: string };
@@ -97,8 +97,10 @@ export class Auth {
     if (verified.kind!=='premium' || verified.status!=='active' || uuid(profile.id)!==verified.profileId || profile.name!==verified.name) throw new Error('正版身份不匹配');
     if (this.session && (verified.profileId!==this.session.account.profileId || verified.id!==this.session.account.id)) throw new Error('正版续期不能替换账号');
     seconds(mc.expires_in,86400);
+    uuid(mc.client_id);
     const game:GameLogin={kind:'premium',profile:{id:verified.profileId,name:verified.name},accessToken:opaque(mc.access_token),
-      xuid:typeof mc.xuid==='string' && mc.xuid.length ? text(mc.xuid,/^[0-9]{1,32}$/):'0',clientId:uuid(mc.client_id)};
+      xuid:typeof mc.xuid==='string' && mc.xuid.length ? text(mc.xuid,/^[0-9]{1,32}$/):'0',
+      clientId:text(mc.client_id,/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i)};
     this.protect(game.accessToken);
     await this.remember({api,account:verified,platformToken:secret(data.account_token),clientToken:this.session?.clientToken || randomUUID(),refreshToken:opaque(data.refresh_token)});
     return game;
@@ -106,7 +108,13 @@ export class Auth {
   async pollPremium() {
     if (!this.view.device || !this.deviceChallenge || Date.now()>this.view.device.expiresAt) {this.cancelPremium();throw new Error('微软授权已过期，请重新发起');}
     if (Date.now()<this.view.device.nextPollAt) return;
-    const api=this.api(); const data=await api.request('/api/v1/premium/poll',{challenge:this.deviceChallenge});
+    const api=this.api();let data:Record<string,unknown>;
+    try { data=await api.request('/api/v1/premium/poll',{challenge:this.deviceChallenge}); }
+    catch(error) {
+      if(error instanceof AuthError && [400,403].includes(error.status))this.cancelPremium();
+      else this.view.device.nextPollAt=Date.now()+15000;
+      throw error;
+    }
     if (data.status==='pending') {this.view.device.nextPollAt=Date.now()+seconds(data.interval,300)*1000;return;}
     if (data.status!=='complete') throw new Error('无效的微软授权状态');
     await this.premium(data,api.base);this.cancelPremium();this.view.binding=null;
@@ -127,7 +135,8 @@ export class Auth {
   async metadata():Promise<string> {
     const data=await this.api().request('/yggdrasil/');const meta=object(data.meta);
     if (typeof data.signaturePublickey!=='string' || !data.signaturePublickey.startsWith('-----BEGIN PUBLIC KEY-----') || meta['feature.non_email_login']!==true) throw new Error('无效的认证服务器配置');
-    return Buffer.from(JSON.stringify(data),'utf8').toString('base64');
+    const json=JSON.stringify(data);if(Buffer.byteLength(json)>16*1024)throw new Error('认证配置过大');
+    return Buffer.from(json,'utf8').toString('base64');
   }
   async logout() {
     this.cancelPremium();this.view.binding=null;

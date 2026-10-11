@@ -6,6 +6,11 @@ import { atomicJson, initializeWorkspace, readInstalled } from './workspace.ts';
 import { verifyEnvelope, type Release } from './release.ts';
 import { installRelease, prepareRelease } from './updater.ts';
 import type { Settings, Snapshot } from './contracts.ts';
+import type { AuthRequest } from './contracts.ts';
+import { Auth } from './auth.ts';
+import { authUrl } from './auth-api.ts';
+import { Vault, type SecretStorage } from './vault.ts';
+import { adapter } from './game-auth.ts';
 
 function errorMessage(error: unknown): string {
   if (error instanceof AggregateError) return '运行环境下载失败：' + errorMessage(error.errors[0]);
@@ -18,14 +23,18 @@ export class Runtime {
   private busy = false;
   private data: string;
   private changed: (state: Snapshot) => void;
+  private auth: Auth;
   readonly state: Snapshot;
-  constructor(data: string, changed: (state: Snapshot) => void) {
+  constructor(data: string, changed: (state: Snapshot) => void, storage:SecretStorage = {
+    available:()=>false,encrypt:()=>{throw Error('System vault unavailable');},decrypt:()=>{throw Error('System vault unavailable');}
+  }) {
     this.data = data;
     this.changed = changed;
     this.state = { settings: { workspace: path.join(data, 'workspaces', 'dev'), javaPath: '', memoryMiB: 4096,
       playerName: 'TownTester', versionId: '', serverAddress: '192.168.31.99', serverPort: 25566,
-      autoConnect: false, localFixtures: false }, phase: 'idle', message: '准备你的 RCT 客户端', gamePid: null,
-      releaseId: null, logs: [], progress: null, trustedKeys: 0 };
+      autoConnect: false, localFixtures: false, authAddress:'',channel:'dev' }, phase: 'idle', message: '准备你的 RCT 客户端', gamePid: null,
+      releaseId: null, logs: [], progress: null, trustedKeys: 0, auth:{account:null,binding:null,device:null} };
+    this.auth=new Auth(new Vault(path.join(data,'accounts-v1.enc.json'),storage),()=>this.state.settings);
   }
   async initialize() {
     await fs.mkdir(this.data, { recursive: true });
@@ -35,12 +44,14 @@ export class Runtime {
     if (!this.state.settings.javaPath) this.state.settings.javaPath = await findJava();
     await initializeWorkspace(this.state.settings.workspace);
     this.state.releaseId = (await readInstalled(this.state.settings.workspace))?.releaseId || null;
+    try {await this.auth.initialize();this.state.auth=this.auth.snapshot();}
+    catch(error) {this.state.message=errorMessage(error);this.state.phase='error';}
     this.emit();
   }
   emit() { this.changed(structuredClone(this.state)); }
   log(line: string) {
     for (const item of line.trim().split('\n')) {
-      this.state.logs.push(item.slice(0, 1200).replace(/((?:accessToken|authorization|password|token)\s*[:=]\s*)[^\s,]+/gi, '$1[redacted]'));
+      this.state.logs.push(this.auth.redact(item).slice(0, 1200).replace(/((?:accessToken|authorization|password|token)\s*[:=]\s*)[^\s,]+/gi, '$1[redacted]'));
     }
     this.state.logs = this.state.logs.slice(-100); this.emit();
   }
@@ -57,6 +68,9 @@ export class Runtime {
     if (typeof next.workspace !== 'string' || !path.isAbsolute(next.workspace) || next.workspace.length > 1024) throw new Error('Invalid workspace');
     if (next.versionId && !/^[a-zA-Z0-9_.-]{1,100}$/.test(next.versionId)) throw new Error('Invalid version ID');
     if (typeof next.autoConnect !== 'boolean' || typeof next.localFixtures !== 'boolean') throw new Error('Invalid flags');
+    if (!['dev','stable'].includes(next.channel) || typeof next.authAddress!=='string') throw new Error('Invalid authentication configuration');
+    if (next.authAddress) authUrl(next.authAddress,next.localFixtures);
+    if (this.state.auth.account && (next.authAddress!==this.state.settings.authAddress || next.localFixtures!==this.state.settings.localFixtures)) throw new Error('请先退出账号，再修改认证地址或安全模式');
     this.state.settings = next; await atomicJson(path.join(this.data, 'settings.json'), next); this.emit();
   }
   async task(name: string, operation: () => Promise<void>) {
@@ -93,10 +107,18 @@ export class Runtime {
   }
   async launch() {
     await this.task('launching', async () => {
+      let authentication: import('./minecraft.ts').GameAuthentication | undefined;
+      if (this.state.auth.account) {
+        const login=await this.auth.game();this.state.auth=this.auth.snapshot();
+        authentication={login};
+        if (login.kind==='offline') authentication.agent={jar:await adapter(this.state.settings.workspace),
+          server:authUrl(this.state.settings.authAddress,this.state.settings.localFixtures)+'/yggdrasil/',prefetched:await this.auth.metadata()};
+      } else if (!(this.state.settings.channel==='dev' && this.state.settings.localFixtures
+        && ['localhost','127.0.0.1','::1'].includes(this.state.settings.serverAddress))) throw new Error('请先登录已验证的账号');
       this.state.gamePid = await startMinecraft(this.state.settings, line => this.log(line), code => {
         this.state.gamePid = null; this.state.phase = code === 0 ? 'idle' : 'error';
         this.state.message = code === 0 ? '游戏已退出' : '游戏退出，代码 ' + code; this.emit();
-      });
+      },authentication);
     });
   }
   async trustKey(file: string) {
@@ -112,7 +134,7 @@ export class Runtime {
       if ((await fs.stat(file)).size > 4 * 1024 ** 2) throw new Error('Manifest too large');
       const release: Release = verifyEnvelope(JSON.parse(await fs.readFile(file, 'utf8')), this.keys, this.state.settings.localFixtures);
       this.controller = new AbortController();
-      const options = { channel: 'dev' as const, allowLoopback: this.state.settings.localFixtures,
+      const options = { channel: this.state.settings.channel, allowLoopback: this.state.settings.localFixtures,
         signal: this.controller.signal, progress: (value: { path: string; bytes: number; total: number }) => {
           this.state.progress = value; this.state.message = value.path; this.emit();
         } };
@@ -121,4 +143,23 @@ export class Runtime {
     });
   }
   cancel() { this.controller?.abort(new Error('Update cancelled by user')); }
+  async authenticate(request:AuthRequest) {
+    if (!request || typeof request!=='object' || Array.isArray(request)
+      || Object.keys(request).some(key=>!['action','name','password','code'].includes(key))) throw new Error('Invalid authentication operation');
+    await this.task('authenticating',async()=>{
+      try {
+        switch(request.action) {
+          case 'login':case 'register':await this.auth.offline(request.name!,request.password!,request.action==='register');break;
+          case 'qq-challenge':await this.auth.challenge();break;
+          case 'qq-status':await this.auth.bindingStatus();break;
+          case 'qq-confirm':await this.auth.confirm(request.code!);break;
+          case 'premium-start':await this.auth.beginPremium();break;
+          case 'premium-poll':await this.auth.pollPremium();break;
+          case 'premium-cancel':this.auth.cancelPremium();break;
+          case 'logout':await this.auth.logout();break;
+          default:throw new Error('Unknown authentication operation');
+        }
+      } finally {this.state.auth=this.auth.snapshot();}
+    });
+  }
 }
