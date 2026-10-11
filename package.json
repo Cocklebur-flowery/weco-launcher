@@ -1,0 +1,47 @@
+{
+  "name": "town-launcher",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "UNLICENSED",
+  "description": "RCT development launcher built on XMCL",
+  "main": "dist/main/main.js",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "vite build && tsc -p tsconfig.runtime.json",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "baseline": "node scripts/baseline.mjs",
+    "publish": "node --experimental-strip-types scripts/publish.mjs",
+    "test:release": "node --experimental-strip-types scripts/release-smoke.mjs",
+    "start": "electron .",
+    "pack": "electron-builder --dir --config.electronDist=node_modules/electron/dist",
+    "prepare:electron": "node node_modules/electron/install.js",
+    "dist:mac": "electron-builder --mac --arm64 --x64",
+    "dist:win": "electron-builder --win --x64",
+    "dist:linux": "electron-builder --linux --x64"
+  },
+  "dependencies": {
+    "@xmcl/core": "2.15.1",
+    "@xmcl/installer": "6.1.2",
+    "vue": "3.5.43"
+  },
+  "overrides": { "undici": "7.29.1" },
+  "devDependencies": {
+    "@types/node": "24.9.0",
+    "@vitejs/plugin-vue": "6.0.10",
+    "electron": "44.7.0",
+    "electron-builder": "26.15.3",
+    "typescript": "5.9.3",
+    "vite": "8.3.4"
+  },
+  "build": {
+    "appId": "townlife.launcher",
+    "productName": "Town Launcher",
+    "directories": { "output": "out" },
+    "files": ["dist/**/*", "package.json"],
+    "asar": true,
+    "mac": { "target": ["dmg", "zip"], "category": "public.app-category.games" },
+    "win": { "target": ["nsis"] },
+    "linux": { "target": ["AppImage", "deb"], "category": "Game" }
+  }
+}
