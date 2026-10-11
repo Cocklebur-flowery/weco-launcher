@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, safeStorage } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promises as fs } from 'node:fs';
 import { Runtime } from './runtime.ts';
 import type { Settings, Result, AuthRequest } from './contracts.ts';
 
@@ -41,6 +42,7 @@ else {
         if (action === 'launch') { await runtime.launch(); return; }
         if (action === 'bootstrap') { await runtime.bootstrap(); return; }
         if (action === 'install-java') { await runtime.installJava(); return; }
+        if (action === 'remote-update') {await runtime.updateRemote();return;}
         if (action === 'logs') { await shell.openPath(path.join(runtime.state.settings.workspace, 'game', 'logs')); return; }
         if (action === 'premium-web') {
           const value=runtime.state.auth.device?.verificationUri;if(!value)throw new Error('请先发起微软登录');
@@ -61,7 +63,10 @@ else {
     });
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     window.webContents.on('will-navigate', event => event.preventDefault());
-    await runtime.initialize();
+    const profileFile=path.join(app.getAppPath(),'resources','launcher-profile.json');let profile:unknown;
+    try {const stat=await fs.lstat(profileFile);if(!stat.isFile() || stat.isSymbolicLink() || stat.size>64*1024)throw new Error('Invalid launcher profile');profile=JSON.parse(await fs.readFile(profileFile,'utf8'));}
+    catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
+    await runtime.initialize(profile);
     await window.loadFile(path.join(here, '..', 'ui', 'index.html'));
     app.on('second-instance', () => { if (!window.isDestroyed()) { window.show(); window.focus(); } });
   }).catch(error => { console.error('Launcher initialization failed:', error); app.quit(); });

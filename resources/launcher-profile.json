@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "authAddress": "https://auth.example.invalid",
+  "manifestAddress": "https://downloads.example.invalid/channels/stable.json",
+  "serverAddress": "play.example.invalid",
+  "serverPort": 25565,
+  "publicKeys": []
+}

@@ -38,7 +38,7 @@
     "appId": "townlife.launcher",
     "productName": "Town Launcher",
     "directories": { "output": "out" },
-    "files": ["dist/**/*", "package.json"],
+    "files": ["dist/**/*", "package.json", "resources/launcher-profile.json"],
     "asar": true,
     "mac": { "target": ["dmg", "zip"], "category": "public.app-category.games" },
     "win": { "target": ["nsis"] },

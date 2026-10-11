@@ -1,8 +1,8 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createHash, createPublicKey } from 'node:crypto';
-import { findJava, importClient, bootstrap, startMinecraft, offlineProfile, installManagedJava } from './minecraft.ts';
-import { atomicJson, initializeWorkspace, readInstalled } from './workspace.ts';
+import { findJava, checkJava, importClient, bootstrap, startMinecraft, offlineProfile, installManagedJava } from './minecraft.ts';
+import { atomicJson, initializeWorkspace, readInstalled, exists } from './workspace.ts';
 import { verifyEnvelope, type Release } from './release.ts';
 import { installRelease, prepareRelease } from './updater.ts';
 import type { Settings, Snapshot } from './contracts.ts';
@@ -11,6 +11,7 @@ import { Auth } from './auth.ts';
 import { authUrl } from './auth-api.ts';
 import { Vault, type SecretStorage } from './vault.ts';
 import { adapter } from './game-auth.ts';
+import { manifestUrl, remoteRelease, distributionProfile } from './remote.ts';
 
 function errorMessage(error: unknown): string {
   if (error instanceof AggregateError) return '运行环境下载失败：' + errorMessage(error.errors[0]);
@@ -32,14 +33,19 @@ export class Runtime {
     this.changed = changed;
     this.state = { settings: { workspace: path.join(data, 'workspaces', 'dev'), javaPath: '', memoryMiB: 4096,
       playerName: 'TownTester', versionId: '', serverAddress: '192.168.31.99', serverPort: 25566,
-      autoConnect: false, localFixtures: false, authAddress:'',channel:'dev' }, phase: 'idle', message: '准备你的 RCT 客户端', gamePid: null,
+      autoConnect: false, localFixtures: false, authAddress:'',channel:'dev',manifestAddress:'' }, phase: 'idle', message: '准备你的 RCT 客户端', gamePid: null,
       releaseId: null, logs: [], progress: null, trustedKeys: 0, auth:{account:null,binding:null,device:null} };
     this.auth=new Auth(new Vault(path.join(data,'accounts-v1.enc.json'),storage),()=>this.state.settings);
   }
-  async initialize() {
+  async initialize(profile?:unknown) {
     await fs.mkdir(this.data, { recursive: true });
+    const fresh=!await exists(path.join(this.data,'settings.json'));
     try { await this.configure(JSON.parse(await fs.readFile(path.join(this.data, 'settings.json'), 'utf8'))); } catch {}
     try { this.keys = JSON.parse(await fs.readFile(path.join(this.data, 'trusted-keys.json'), 'utf8')); } catch {}
+    if(profile!==undefined){
+      const defaults=distributionProfile(profile);if(fresh)await this.configure(defaults.settings);
+      this.keys={...this.keys,...defaults.keys};await atomicJson(path.join(this.data,'trusted-keys.json'),this.keys);
+    }
     this.state.trustedKeys = Object.keys(this.keys).length;
     if (!this.state.settings.javaPath) this.state.settings.javaPath = await findJava();
     await initializeWorkspace(this.state.settings.workspace);
@@ -69,6 +75,7 @@ export class Runtime {
     if (next.versionId && !/^[a-zA-Z0-9_.-]{1,100}$/.test(next.versionId)) throw new Error('Invalid version ID');
     if (typeof next.autoConnect !== 'boolean' || typeof next.localFixtures !== 'boolean') throw new Error('Invalid flags');
     if (!['dev','stable'].includes(next.channel) || typeof next.authAddress!=='string') throw new Error('Invalid authentication configuration');
+    if(typeof next.manifestAddress!=='string')throw new Error('Invalid manifest configuration');if(next.manifestAddress)manifestUrl(next.manifestAddress,next.localFixtures);
     if (next.authAddress) authUrl(next.authAddress,next.localFixtures);
     if (this.state.auth.account && (next.authAddress!==this.state.settings.authAddress || next.localFixtures!==this.state.settings.localFixtures)) throw new Error('请先退出账号，再修改认证地址或安全模式');
     this.state.settings = next; await atomicJson(path.join(this.data, 'settings.json'), next); this.emit();
@@ -107,6 +114,20 @@ export class Runtime {
   }
   async launch() {
     await this.task('launching', async () => {
+      const account=this.state.auth.account;
+      const fixture=this.state.settings.channel==='dev' && this.state.settings.localFixtures
+        && ['localhost','127.0.0.1','::1'].includes(this.state.settings.serverAddress);
+      if(!account && !fixture)throw new Error('请先登录已验证的账号');
+      if(account && account.status!=='active')throw new Error('请先完成 QQ 验证激活账号');
+      if(this.state.settings.channel==='stable' || this.state.settings.manifestAddress){
+        const release=await this.fetchRemote();
+        if(!this.state.settings.versionId){
+          try {await checkJava(this.state.settings.javaPath);}catch {this.state.settings.javaPath=await installManagedJava(this.state.settings.workspace,line=>this.log(line));}
+          this.state.settings.versionId=await bootstrap(this.state.settings.workspace,this.state.settings.javaPath,line=>this.log(line));
+          await atomicJson(path.join(this.data,'settings.json'),this.state.settings);
+        }
+        await this.applyRemote(release,false);
+      }
       let authentication: import('./minecraft.ts').GameAuthentication | undefined;
       if (this.state.auth.account) {
         const login=await this.auth.game();this.state.auth=this.auth.snapshot();
@@ -143,6 +164,26 @@ export class Runtime {
     });
   }
   cancel() { this.controller?.abort(new Error('Update cancelled by user')); }
+  private async fetchRemote() {
+    if(!this.state.settings.manifestAddress)throw new Error('请先配置当前渠道的远程发布清单地址');
+    this.controller=new AbortController();this.state.message='检查已签名的最新客户端版本';this.emit();
+    const release=await remoteRelease(this.state.settings.manifestAddress,this.keys,this.state.settings.localFixtures,this.controller.signal);
+    if(release.channel!==this.state.settings.channel || release.activation!=='active')throw new Error('远程发布不是当前渠道的可用正式版本');
+    return release;
+  }
+  private async applyRemote(release:Release,prepareOnly:boolean) {
+    const options={channel:this.state.settings.channel,allowLoopback:this.state.settings.localFixtures,signal:this.controller?.signal,
+      progress:(value:{path:string;bytes:number;total:number})=>{this.state.progress=value;this.state.message=value.path;this.emit();}};
+    if(prepareOnly)await prepareRelease(this.state.settings.workspace,release,options);
+    else this.state.releaseId=(await installRelease(this.state.settings.workspace,release,options)).releaseId;
+  }
+  async updateRemote() {
+    await this.task('updating',async()=>{
+      const release=await this.fetchRemote();const prepareOnly=!this.state.settings.versionId;
+      await this.applyRemote(release,prepareOnly);
+      if(prepareOnly)this.log('更新已预下载；首次开始游戏时自动安装运行环境并启用更新');
+    });
+  }
   async authenticate(request:AuthRequest) {
     if (!request || typeof request!=='object' || Array.isArray(request)
       || Object.keys(request).some(key=>!['action','name','password','code'].includes(key))) throw new Error('Invalid authentication operation');
