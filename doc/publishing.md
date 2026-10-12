@@ -1,4 +1,23 @@
-# P3.1 — DEV release producer
+# Launcher release producer
+
+Current source supports DEV and reviewed Stable publication. The dated P3.1
+acceptance below is a historical snapshot; authentication and remote Stable
+consumption now have their own source/tests and `accounts-and-updates.md` guide.
+The launcher is an independent Git repository; no remote/push is configured.
+
+Stable plans add `channel: "stable"`, a positive `sequence`, and
+`stableBaseline: {serverRoot, serverOnly, clientOnly}`. `serverRoot` is an explicitly
+selected read-only server directory. Shared client Mod bytes must match installed
+server hashes; server/client-only entries are exact reviewed paths. Old plans with
+no channel continue to produce DEV. No unfinished DEV build is implicitly promoted.
+
+Upload only owned immutable artifacts, verify the signed release/download hashes,
+then publish the copied signed `manifest.json` as the HTTPS Stable channel object.
+Keep the private signing key and input operator paths out of COS/player packages.
+The producer does not upload or mutate cloud state. See `doc/accounts-and-updates.md`
+and the backend's `doc/deployment.md` before an approved cutover.
+
+## Historical P3.1 baseline
 
 The producer runs on Mac mini in `Dev/ModDev/town-launcher`. It does not configure
 COS, publish a channel pointer, modify a game server, or upgrade installed Mods.
@@ -76,7 +95,7 @@ only for deliberately release-controlled configuration.
 }
 ```
 
-The generated release is DEV-only. Modrinth bindings are rechecked against live metadata
+At the P3.1 baseline the generated release was DEV-only. Modrinth bindings are rechecked against live metadata
 at build time; local files and project artifact proofs are hashed again. The signer accepts
 only Ed25519 keys. CLI key files must be regular files, at most 16 KiB, and private (0600)
 on POSIX systems; Windows ACL protection must be configured separately.

@@ -1,0 +1,14 @@
+Town Launcher consumes pinned XMCL core/installer packages under their upstream
+MIT licenses. Other dependency licenses remain with their packages.
+
+External service-account game authentication uses the independently downloaded,
+unmodified authlib-injector 1.2.8 Java agent. It is not project-owned Mod code.
+Upstream author/source and the AGPL license with authlib-injector exception:
+https://github.com/yushijinhun/authlib-injector
+https://github.com/yushijinhun/authlib-injector/releases/tag/v1.2.8
+
+The launcher does not copy the agent implementation into its business logic.
+Retain the original artifact and upstream notices. Redistribution/commercial
+release still requires the project's separate licensing review.
+
+Project licensing remains UNLICENSED/private until the owner chooses otherwise.
