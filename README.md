@@ -1,7 +1,18 @@
-# Town Launcher
+# Weco Launcher
 
-Independent RCT launcher. Canonical development and compilation run on Mac mini.
-Existing HMCL clients and all servers remain untouched.
+An independent, unofficial Minecraft: Java Edition launcher and modpack updater
+developed for the Weco community, licensed under GNU GPL v3.0 only.
+It targets Windows, Linux, and macOS and is under active development.
+
+The launcher uses pinned XMCL core and installer libraries, an Electron desktop
+runtime, and a Vue interface. It supports isolated game workspaces, signed Stable
+updates, Microsoft-account authentication, and a separate community authentication
+provider. It is not affiliated with Mojang or Microsoft.
+
+This repository publishes launcher source, tests, and documentation, not a ready
+production client or Minecraft distribution. It contains no game files, server
+worlds, authentication backend, cloud credentials, or account vault.
+Existing HMCL clients and servers are not changed by this source publication.
 
 ## Commands
 
@@ -11,11 +22,16 @@ Electron's runtime download must complete its checksum verification before launc
 `npm run pack` reuses that runtime and is native-architecture only.
 Packaging targets: `dist:mac`, `dist:win`, `dist:linux`.
 Unsigned packages are development artifacts, not public releases.
+Windows/Linux and Intel-Mac in-game acceptance remain outstanding; target support
+and packaging configuration do not imply completed native runtime validation.
+Internal package and application identifiers retain the existing Town names for
+compatibility.
 
 ## Ownership
 
 XMCL is consumed as pinned MIT-licensed dependencies, not copied application code.
-Dependency licenses remain in their packages. Project licensing is undecided.
+Dependency licenses remain in their packages and are not replaced by this
+project's GPL license. See [third-party notices](resources/THIRD_PARTY_NOTICES.txt).
 No cloud credential, player token or account is bundled. The owned Microsoft
 application ID is configured by weco-auth, not borrowed from another launcher.
 Unverified offline profiles are restricted to explicit loopback DEV fixtures;
@@ -25,6 +41,8 @@ See [contracts](doc/contracts.md) and [validation](doc/validation.md).
 The [release producer](doc/publishing.md) generates and signs real-file release
 plans without cloud publication or changing existing clients/servers.
 Runtime evidence is intentionally ignored.
+Milestone documents include dated development snapshots; publishing this source
+does not activate a game release or deploy its external services.
 
 ## Verified accounts and Stable updates
 
@@ -45,3 +63,18 @@ hashes and monotonic sequence, and installs only while the game is stopped.
 Official sessions launch without a client agent; activated service accounts use
 the pinned unmodified adapter. Existing clients, caches and servers are not
 replaced in place. Real QQ/Microsoft/COS/game acceptance remains external setup.
+
+## License
+
+Copyright (C) 2026 Cocklebur-flowery and contributors.
+
+Project-owned source in this repository is licensed under the GNU General Public
+License, version 3 only (SPDX: `GPL-3.0-only`). You may redistribute and modify it
+under those terms. It is provided without any warranty, including implied
+warranties of merchantability or fitness for a particular purpose.
+See [LICENSE](LICENSE) for the full terms.
+
+Third-party dependencies and the separately downloaded, unmodified
+authlib-injector adapter retain their own licenses, copyrights, and notices.
+This license does not grant rights to Minecraft game files, unrelated Weco
+repositories, or third-party trademarks.

@@ -5,3 +5,12 @@ runtime/
 evidence/
 *.log
 .DS_Store
+
+# Credentials and signing keys never belong in the source repository.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx

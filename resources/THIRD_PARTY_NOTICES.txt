@@ -1,4 +1,4 @@
-Town Launcher consumes pinned XMCL core/installer packages under their upstream
+Weco Launcher consumes pinned XMCL core/installer packages under their upstream
 MIT licenses. Other dependency licenses remain with their packages.
 
 External service-account game authentication uses the independently downloaded,
@@ -11,4 +11,6 @@ The launcher does not copy the agent implementation into its business logic.
 Retain the original artifact and upstream notices. Redistribution/commercial
 release still requires the project's separate licensing review.
 
-Project licensing remains UNLICENSED/private until the owner chooses otherwise.
+Project-owned launcher source is licensed under GNU GPL v3.0 only
+(SPDX: GPL-3.0-only). See LICENSE for the full text.
+This does not relicense third-party dependencies or the independent agent.
